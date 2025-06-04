@@ -1,0 +1,40 @@
+{
+  "button_map": [
+    {
+      "button_id": "btn_01",
+      "label": "Speed+",
+      "modifier": 0,
+      "key": 23
+    },
+    {
+      "button_id": "btn_02",
+      "label": "Play/Stop",
+      "modifier": 0,
+      "key": 44
+    },
+    {
+      "button_id": "btn_03",
+      "label": "Speed-",
+      "modifier": 0,
+      "key": 24
+    },
+    {
+      "button_id": "btn_04",
+      "label": "Normal",
+      "modifier": 0,
+      "key": 46
+    },
+    {
+      "button_id": "btn_05",
+      "label": "-10sec",
+      "modifier": 0,
+      "key": 32
+    },
+    {
+      "button_id": "btn_06",
+      "label": "+10sec",
+      "modifier": 0,
+      "key": 33
+    }
+  ]
+}

@@ -1,83 +1,383 @@
 #include <Arduino.h>
-
+#include <SPI.h>
+#include <SD.h>
+#include <ArduinoJson.h>
+#include <TFT_eSPI.h>
 #include <esp32_smartdisplay.h>
-#include <ui/ui.h>
 
-void OnAddOneClicked(lv_event_t *e)
-{
-    static uint32_t cnt = 0;
-    cnt++;
-    lv_label_set_text_fmt(ui_lblCountValue, "%u", cnt);
+#include <NimBLEDevice.h>
+#include <NimBLEServer.h>
+#include <NimBLEUtils.h>
+#include <NimBLEHIDDevice.h>
+#include <HIDTypes.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+const int chipSelect = 5;
+
+#define REPORT_ID 1
+#define REPORT_SIZE 8
+
+const char* btn1_label="Speed+";
+uint8_t btn1_mod = 0x00;
+uint8_t btn1_key = 0x23;
+
+const char* btn2_label="Play/Stop";
+uint8_t btn2_mod = 0x00;
+uint8_t btn2_key = 0x2C;
+
+char* btn3_label="Speed-";
+uint8_t btn3_mod = 0x00;
+uint8_t btn3_key = 0x22;
+
+char* btn4_label="Normal";
+uint8_t btn4_mod = 0x00;
+uint8_t btn4_key = 0x23;
+
+char* btn5_label="-10sec";
+uint8_t btn5_mod = 0x00;
+uint8_t btn5_key = 0x20;
+
+char* btn6_label="+10sec";
+uint8_t btn6_mod = 0x00;
+uint8_t btn6_key = 0x21;
+
+char* btn7_label="Vol-";
+uint8_t btn7_mod = 0x01;
+uint8_t btn7_key = 0x51;
+
+char* btn8_label="Vol+";
+uint8_t btn8_mod = 0x01;
+uint8_t btn8_key = 0x52;
+
+
+TFT_eSPI tft = TFT_eSPI();
+
+// HID Report Map for a basic keyboard
+static const uint8_t hidReportDescriptor[] = {
+  0x05, 0x01, // Usage Page (Generic Desktop Ctrls)
+  0x09, 0x06, // Usage (Keyboard)
+  0xA1, 0x01, // Collection (Application)
+  0x85, REPORT_ID, // Report ID
+  0x05, 0x07, // Usage Page (Kbrd/Keypad)
+  0x19, 0xE0, // Usage Minimum (224)
+  0x29, 0xE7, // Usage Maximum (231)
+  0x15, 0x00, // Logical Minimum (0)
+  0x25, 0x01, // Logical Maximum (1)
+  0x75, 0x01, // Report Size (1)
+  0x95, 0x08, // Report Count (8)
+  0x81, 0x02, // Input (Data,Var,Abs)
+  0x95, 0x01, 0x75, 0x08, 0x81, 0x03, // Reserved byte
+  0x95, 0x06, 0x75, 0x08,
+  0x15, 0x00, 0x25, 0x65,
+  0x05, 0x07, 0x19, 0x00, 0x29, 0x65,
+  0x81, 0x00, // Input (keys)
+  0xC0        // End Collection
+};
+
+NimBLEServer *pServer;
+NimBLECharacteristic *inputChar;
+
+bool deviceConnected = false;
+
+// Structure to hold button configuration
+struct ButtonConfig {
+  char button_id[10];
+  char label[10];
+  uint8_t modifier;
+  uint8_t key;
+};
+
+#define MAX_BUTTONS 6
+ButtonConfig buttons[MAX_BUTTONS];  // Global array to store parsed button info
+int buttonCount = 0;
+
+
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* s) {
+    deviceConnected = true;
+    Serial.println("Client connected.");
+  }
+  void onDisconnect(NimBLEServer* s) {
+    deviceConnected = false;
+    Serial.println("Client disconnected.");
+  }
+};
+
+
+
+void sendKey(uint8_t modifier, uint8_t keyCode) {
+  if (!deviceConnected) return;
+
+  uint8_t report[REPORT_SIZE] = { 0 };
+  report[0] = modifier;
+  report[2] = keyCode; // Set keycode (e.g., 0x04 = 'a')
+
+  inputChar->setValue(report, sizeof(report));
+  inputChar->notify();
+
+  delay(10);
+
+  // Release
+  memset(report, 0, sizeof(report));
+  inputChar->setValue(report, sizeof(report));
+  inputChar->notify();
 }
 
-void OnRotateClicked(lv_event_t *e)
-{
-    auto disp = lv_disp_get_default();
-    auto rotation = (lv_display_rotation_t)((lv_disp_get_rotation(disp) + 1) % (LV_DISPLAY_ROTATION_270 + 1));
-    lv_display_set_rotation(disp, rotation);
+
+// Speed-
+void btn1_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        if (deviceConnected) {
+            sendKey(btn1_mod,btn1_key);
+        }
+    }
 }
 
-void setup()
-{
-#ifdef ARDUINO_USB_CDC_ON_BOOT
-    delay(5000);
-#endif
-    Serial.begin(115200);
-    Serial.setDebugOutput(true);
-    log_i("Board: %s", BOARD_NAME);
-    log_i("CPU: %s rev%d, CPU Freq: %d Mhz, %d core(s)", ESP.getChipModel(), ESP.getChipRevision(), getCpuFrequencyMhz(), ESP.getChipCores());
-    log_i("Free heap: %d bytes", ESP.getFreeHeap());
-    log_i("Free PSRAM: %d bytes", ESP.getPsramSize());
-    log_i("SDK version: %s", ESP.getSdkVersion());
-
-    smartdisplay_init();
-
-    __attribute__((unused)) auto disp = lv_disp_get_default();
-    // lv_disp_set_rotation(disp, LV_DISP_ROT_90);
-    // lv_disp_set_rotation(disp, LV_DISP_ROT_180);
-    // lv_disp_set_rotation(disp, LV_DISP_ROT_270);
-
-    ui_init();
-
-    // To use third party libraries, enable the define in lv_conf.h: #define LV_USE_QRCODE 1
-    auto ui_qrcode = lv_qrcode_create(ui_scrMain);
-    lv_qrcode_set_size(ui_qrcode, 100);
-    lv_qrcode_set_dark_color(ui_qrcode, lv_color_black());
-    lv_qrcode_set_light_color(ui_qrcode, lv_color_white());
-    const char *qr_data = "https://github.com/rzeldent/esp32-smartdisplay";
-    lv_qrcode_update(ui_qrcode, qr_data, strlen(qr_data));
-    lv_obj_center(ui_qrcode);
+// Play stop
+void btn2_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        if (deviceConnected) {
+            sendKey(btn2_mod,btn2_key);
+        }
+    }
 }
 
+// Speed +
+void btn3_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        if (deviceConnected) {
+            sendKey(btn3_mod,btn3_key);
+          }
+    }
+}
+
+// Normal speed
+void btn4_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        if (deviceConnected) {
+            sendKey(btn4_mod,btn4_key);
+        }
+    }
+}
+
+
+// back 10 seconds
+void btn5_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        if (deviceConnected) {
+            sendKey(btn5_mod,btn5_key);
+          }
+    }
+}
+
+
+// forward 10 seconds
+void btn6_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        if (deviceConnected) {
+            Serial.println("luca");
+            sendKey(btn6_mod,btn6_key);
+        }
+    }
+}
+
+// volume down
+void btn7_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        if (deviceConnected) {
+            sendKey(btn7_mod,btn7_key);
+        }
+    }
+}
+
+// volume up
+void btn8_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        if (deviceConnected) {
+            sendKey(btn8_mod,btn8_key);
+        }
+    }
+}
+
+void create_grid_with_buttons(lv_obj_t *parent) {
+    // Create a container to hold the grid
+    lv_obj_t *grid = lv_obj_create(parent);
+    lv_obj_set_size(grid, 240, 320); // Adjust size as needed
+    lv_obj_center(grid);             // Center on screen
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP); // Horizontal wrap layout
+    lv_obj_set_style_pad_row(grid, 10, 0);              // Spacing between rows
+    lv_obj_set_style_pad_column(grid, 10, 0);           // Spacing between columns
+    lv_obj_set_style_pad_all(grid, 10, 0);              // Inner padding
+
+    // Create 6 buttons (2 rows × 3 columns)
+    for (int i = 0; i < 8; i++) {
+        lv_obj_t *btn = lv_btn_create(grid);
+        lv_obj_set_size(btn, 100, 60);  // Adjust button size as needed
+
+        lv_obj_t *label = lv_label_create(btn);
+        switch(i){
+            case 0:
+                lv_label_set_text_fmt(label, btn1_label);
+                lv_obj_center(label);
+                lv_obj_add_event_cb(btn, btn1_event_handler, LV_EVENT_CLICKED, NULL);
+                break;
+            case 1:
+                lv_label_set_text_fmt(label, btn2_label);
+                lv_obj_center(label);
+                lv_obj_add_event_cb(btn, btn2_event_handler, LV_EVENT_CLICKED, NULL);
+                break;
+            case 2:
+                lv_label_set_text_fmt(label, btn3_label);
+                lv_obj_center(label);
+                lv_obj_add_event_cb(btn, btn3_event_handler, LV_EVENT_CLICKED, NULL);
+                break;
+            case 3:
+                lv_label_set_text_fmt(label, btn4_label);
+                lv_obj_center(label);
+                lv_obj_add_event_cb(btn, btn4_event_handler, LV_EVENT_CLICKED, NULL);
+                break;
+            case 4:
+                lv_label_set_text_fmt(label, btn5_label);
+                lv_obj_center(label);
+                lv_obj_add_event_cb(btn, btn5_event_handler, LV_EVENT_CLICKED, NULL);
+                break;
+            case 5:
+                lv_label_set_text_fmt(label, btn6_label);
+                lv_obj_center(label);
+                lv_obj_add_event_cb(btn, btn6_event_handler, LV_EVENT_CLICKED, NULL);
+                break;
+            case 6:
+                lv_label_set_text_fmt(label, btn7_label);
+                lv_obj_center(label);
+                lv_obj_add_event_cb(btn, btn7_event_handler, LV_EVENT_CLICKED, NULL);
+                break;
+            case 7:
+                lv_label_set_text_fmt(label, btn8_label);
+                lv_obj_center(label);
+                lv_obj_add_event_cb(btn, btn8_event_handler, LV_EVENT_CLICKED, NULL);
+                break;
+
+
+            } 
+        
+    }
+}
+
+void lv_tick_handler(void *arg) {
+  lv_tick_inc(1);
+}
+
+void my_disp_flush(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map) {
+    //int32_t x1 = area->x1;
+    //int32_t y1 = area->y1;
+    //int32_t x2 = area->x2;
+    //int32_t y2 = area->y2;
+
+    //int32_t w = x2 - x1 + 1;
+    //int32_t h = y2 - y1 + 1;
+
+    // Replace this with your actual display driver's draw function
+    //my_display_draw_bitmap(x1, y1, w, h, (lv_color_t *)px_map);
+    //drawBitmap(area->x1, area->y1, width, height, (lv_color_t*)px_map);
+
+
+    // Tell LVGL we're done flushing
+    lv_display_flush_ready(disp);   
+}
+
+
+void setup() {
+  Serial.begin(115200);
+ 
+  NimBLEDevice::init("ESP32 NimBLE Keyboard");
+  pServer = NimBLEDevice::createServer();
+
+  static ServerCallbacks serverCallbacks;
+  pServer->setCallbacks(&serverCallbacks);
+ 
+  NimBLEService *hidService = pServer->createService("1812"); // HID service UUID
+
+  NimBLECharacteristic *hidInfo = hidService->createCharacteristic("2A4A", NIMBLE_PROPERTY::READ);
+  uint8_t hidInfoValue[4] = { 0x11, 0x01, 0x00, 0x02 }; // HID info: ver 1.11, not normally connectable, USB HID
+  hidInfo->setValue(hidInfoValue, sizeof(hidInfoValue));
+
+  NimBLECharacteristic *reportMap = hidService->createCharacteristic("2A4B", NIMBLE_PROPERTY::READ);
+  reportMap->setValue(hidReportDescriptor, sizeof(hidReportDescriptor));
+
+  NimBLECharacteristic *hidControlPoint = hidService->createCharacteristic("2A4C", NIMBLE_PROPERTY::WRITE_NR);
+  hidControlPoint->setValue((uint8_t *)"\x00", 1);
+
+  inputChar = hidService->createCharacteristic("2A4D", NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+  inputChar->createDescriptor("2902", NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
+
+  NimBLEDescriptor *reportRef = inputChar->createDescriptor("2908", NIMBLE_PROPERTY::READ, 2);
+  uint8_t refVal[2] = { REPORT_ID, 0x01 }; // Report ID, Input Report
+  reportRef->setValue(refVal, sizeof(refVal));
+
+  NimBLECharacteristic *protoMode = hidService->createCharacteristic("2A4E", NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE_NR);
+  protoMode->setValue((uint8_t *)"\x01", 1); // Report Protocol mode
+
+  hidService->start();
+
+  NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID("1812");
+  pAdvertising->setAppearance(961); // Keyboard
+  
+  pAdvertising->start();
+
+
+  tft.begin();
+  tft.setRotation(0);  // Rotate 90°
+  // Initialize LVGL and display here
+  lv_init();
+  smartdisplay_init();    
+
+  const esp_timer_create_args_t lv_tick_timer_args = {
+    .callback = &lv_tick_handler,
+    .arg = NULL,
+    .dispatch_method = ESP_TIMER_TASK,
+    .name = "lv_tick"
+  };
+  esp_timer_handle_t lv_tick_timer;
+  esp_timer_create(&lv_tick_timer_args, &lv_tick_timer);
+  esp_timer_start_periodic(lv_tick_timer, 10000); // 10 ms interval
+
+  lv_display_t *disp = lv_display_create(320, 240);
+  lv_display_set_flush_cb(disp, my_disp_flush);
+  lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90);
+
+
+  lv_obj_t *scr = lv_scr_act();
+  if (scr) {
+    create_grid_with_buttons(scr);
+  } else {
+    printf("Error: lv_scr_act() returned NULL\n");
+  }
+}
 ulong next_millis;
 auto lv_last_tick = millis();
 
-void loop()
-{
-    auto const now = millis();
-    if (now > next_millis)
-    {
-        next_millis = now + 500;
+void loop() {
+  if (pServer->getConnectedCount() > 0 && !deviceConnected) {
+  //Serial.println("Detected device connected (GATT)");
+    deviceConnected = true;
+  }
 
-        char text_buffer[32];
-        sprintf(text_buffer, "%lu", now);
-        lv_label_set_text(ui_lblMillisecondsValue, text_buffer);
+  auto const now = millis();
+  lv_tick_inc(now - lv_last_tick);
+  lv_last_tick = now;
 
-#ifdef BOARD_HAS_RGB_LED
-        auto const rgb = (now / 2000) % 8;
-        smartdisplay_led_set_rgb(rgb & 0x01, rgb & 0x02, rgb & 0x04);
-#endif
+  lv_timer_handler();
 
-#ifdef BOARD_HAS_CDS
-        auto cdr = analogReadMilliVolts(CDS);
-        sprintf(text_buffer, "%d", cdr);
-        lv_label_set_text(ui_lblCdrValue, text_buffer);
-#endif
-    }
-
-    // Update the ticker
-    lv_tick_inc(now - lv_last_tick);
-    lv_last_tick = now;
-    // Update the UI
-    lv_timer_handler();
+  vTaskDelay(pdMS_TO_TICKS(5)); // Better than delay()
 }

@@ -3,3 +3,9 @@
 // LVGL version: 8.3.11
 // Project name: SquareLine_Project
 
+#include "ui.h"
+
+void clk_button1(lv_event_t * e)
+{
+	// Your code here
+}
