@@ -1,10 +1,11 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <SD.h>
+#include <FS.h>
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h>
 #include <esp32_smartdisplay.h>
-
+#include <SD_MMC.h>
 #include <NimBLEDevice.h>
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
@@ -13,8 +14,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-const int chipSelect = 5;
 
 #define REPORT_ID 1
 #define REPORT_SIZE 8
@@ -298,7 +297,8 @@ void my_disp_flush(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map
 
 void setup() {
   Serial.begin(115200);
- 
+  delay(1000);
+
   NimBLEDevice::init("ESP32 NimBLE Keyboard");
   pServer = NimBLEDevice::createServer();
 
@@ -335,12 +335,24 @@ void setup() {
   
   pAdvertising->start();
 
+  digitalWrite(22, HIGH); // Touch controller chip select (if used)
+  digitalWrite(15, HIGH); // TFT screen chip select
+  digitalWrite( 5, HIGH); // SD card chips select, must use GPIO 5 (ESP32 SS)
 
   tft.begin();
-  tft.setRotation(0);  // Rotate 90°
+  delay(500);
+  //tft.setRotation(0);  // Rotate 90°
   // Initialize LVGL and display here
+  if (!SD.begin(5)) {
+    Serial.println("SD card failed!");
+  } else {
+    Serial.println("SD card initialized.");
+  }
+
+
   lv_init();
   smartdisplay_init();    
+
 
   const esp_timer_create_args_t lv_tick_timer_args = {
     .callback = &lv_tick_handler,
